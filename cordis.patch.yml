@@ -1,0 +1,71 @@
+# dsh-fk-search-tier — bundle patch layer
+#
+# 由 dsh plugin add 安装后、且本包出现在 profile 的 dsh.profile.bundles 里时，
+# DSH 会按 bundle 顺序自动加载本文件。**不要手工把内容抄进 profile 的
+# cordis.patch.yml** —— 那会绕过 bundle 的加载时序，导致 web 服务与
+# provider 互相等待（tool-web: waiting for web）。
+#
+# 生效原理：
+#   1. insert 一行 loader，注册本插件的 search provider（id: search-tier）
+#   2. 覆盖 base 的 web 行，把 searchProvider / fetchProvider 指向本插件
+#
+# ⚠️ patch 是「整段替换」而不是合并：base 的 web 行原本带
+#    `fetchProvider: http`，这里必须原样重述该行需要的每一个键。
+- id: web
+  config:
+    searchProvider: search-tier
+    fetchProvider: fetch-tier      # 本插件提供两级抓取；改成 http 则回退官方直连
+
+- insert:
+    - id: search-tier
+      name: dsh-fk-search-tier
+      config:
+        # ── Search 层级顺序：先 Tavily，失败/额度耗尽后切 DeepSeek ──
+        order:
+          - tavily
+          - deepseek
+
+        # ── Fetch 层级顺序：先 DeepSeek Fetch API（干净 Markdown），失败切直连 ──
+        fetchOrder:
+          - deepseek-fetch
+          - direct
+
+        # 第 1 层：Tavily
+        #   apiKey 留空 → 自动走 keyless 匿名档（免注册，实测可用）
+        #   有 key 时填在下面，走账户额度（1000 credits/月免费）
+        tavily:
+          # apiKey: ''
+          depth: basic          # basic | advanced（advanced 消耗 2 倍额度）
+          maxResults: 8
+
+        # 第 2 层（Search）/ 第 1 层（Fetch）：DeepSeek 官方 API
+        #   Search: POST /v1/tools/search，5 元/1000 次成功请求
+        #   Fetch:  POST /v1/tools/fetch，  同样按次计费
+        #   apiKey 与主模型同一个 DeepSeek key 即可
+        deepseek:
+          # ⚠️ 不要在这里写密钥！这里是【随插件发布】的文件，写到哪都会被公开。
+          #    正确做法：把 key 设成 DSH 的环境变量 DEEPSEEK_API_KEY，
+          #    插件会自动读取（见 README「配置」章节）。
+          #    也可以在本机 profile 的 cordis.patch.yml 里覆盖本行 —— 那是私有文件。
+          apiKey: ''              # 留空 → 回退读 DEEPSEEK_API_KEY
+          baseURL: https://api.deepseek.com
+          maxResults: 8
+          needContent: false     # true 会额外返回网页正文（更慢、结果更长）
+
+        # Fetch 第 2 层：直连抓取（零成本兜底，HTML → 纯文本）
+        #   userAgent 可覆盖默认 UA；一般不用填
+        direct:
+          # userAgent: ''
+          {}
+
+        # ── 通用 ──
+        timeoutMs: 20000         # 单层超时（搜索）
+        fetchTimeoutMs: 30000    # 单层超时（抓取，页面通常更大，给多点）
+        failOnEmpty: true        # 搜索：上一层返回 0 条也切下一层
+
+        # 熔断参数（搜索与抓取各用一个实例，参数相同）
+        breaker:
+          threshold: 3           # 瞬时故障累计几次才开断
+          burstWindowMs: 300000  # 5 分钟窗口
+          cooldownMs: 60000      # 瞬时故障冷却 60 秒
+          quotaCooldownMs: 3600000  # 额度耗尽冷却 1 小时

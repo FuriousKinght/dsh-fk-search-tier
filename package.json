@@ -1,0 +1,39 @@
+{
+  "name": "dsh-fk-search-tier",
+  "version": "0.2.0",
+  "description": "两级搜索 failover（Tavily → DeepSeek Search API）：第一层失败/额度耗尽自动切第二层，带额度感知熔断。DeepSeek Harness 插件。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "search",
+    "failover",
+    "tavily"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.1 <5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

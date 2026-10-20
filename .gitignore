@@ -1,0 +1,28 @@
+# 运行时产物
+exports/
+*.log
+errors.log
+oplog.jsonl
+boot-log.jsonl
+
+# 依赖与构建
+node_modules/
+dist/
+*.tsbuildinfo
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 备份文件
+*.bak
+*.bak-*
+
+# 临时文件
+*.tmp
+.tmp/
+*.swp
+*~
