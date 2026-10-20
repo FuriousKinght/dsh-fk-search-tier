@@ -54,9 +54,74 @@ dsh plugin --profile desktop add <本包路径或包名>
 
 ## 配置
 
-全部配置在**本插件自带的 `cordis.patch.yml`** 里。也可以在 profile 层用同 id 覆盖。
+### ⚠️ 先把这件事说清楚：密钥不要写进插件目录
 
-### 最小配置（零配置，Tavily keyless + 无 DeepSeek）
+插件目录里的 `cordis.patch.yml` 是**随插件发布**的文件。
+把 `apiKey` 写在那里，等于把密钥公开（推 GitHub、发给别人、打包分发都会带上）。
+
+**正确做法有两种，任选其一（推荐 A）：**
+
+---
+
+### A. 用环境变量（推荐）
+
+插件会自动读这两个环境变量，`cordis.patch.yml` 里留空即可：
+
+| 后端 | 环境变量 |
+|---|---|
+| DeepSeek Search / Fetch | `DEEPSEEK_API_KEY` |
+| Tavily（可选） | `TAVILY_API_KEY` |
+
+**Windows — PowerShell（当前用户，永久生效）：**
+
+```powershell
+[Environment]::SetEnvironmentVariable("DEEPSEEK_API_KEY", "sk-你的key", "User")
+```
+
+**Windows — 图形界面：**
+
+```
+Win + R  →  sysdm.cpl  →  高级  →  环境变量
+  → 用户变量 → 新建 → 变量名 DEEPSEEK_API_KEY，变量值填你的 key
+  → 确定 → 重启 DSH
+```
+
+> 改完环境变量**必须重启 DSH** 才生效 —— 已在运行的进程不会重新读取。
+
+---
+
+### B. 在 profile 层覆盖（密钥放私有文件）
+
+`$DSH_HOME/profiles/<profile>/cordis.patch.yml` 是**你自己的私有文件**，不随插件发布。
+
+在文件末尾追加：
+
+```yaml
+# 覆盖 search-tier 的配置（本文件是私有的，可以写密钥）
+- id: search-tier
+  name: dsh-fk-search-tier
+  config:
+    order: [tavily, deepseek]
+
+    deepseek:
+      apiKey: 'sk-你的key'
+      baseURL: https://api.deepseek.com
+
+    tavily:
+      apiKey: 'tvly-你的key'   # 可选；没有就走 keyless 匿名档
+```
+
+**注意**：profile 层的同名 id 会**整段覆盖**插件自带的配置，
+所以「想保留的键都要重述一遍」，不能只写 `apiKey`。
+
+---
+
+### 最小配置（零配置也能用）
+
+**不配任何密钥**也能工作：
+
+- **Search**：Tavily 的 keyless 匿名档（免注册，实测可用）
+- **Fetch**：直连抓取（零成本兜底）
 
 ```yaml
 - id: search-tier
@@ -67,34 +132,85 @@ dsh plugin --profile desktop add <本包路径或包名>
     deepseek: {}          # 无 key → 该层自动跳过
 ```
 
-### 推荐配置（Tavily 免费 key + DeepSeek 兜底）
+**代价**：没有 DeepSeek 层作为兜底，Tavily 匿名档限流时就没有第二层了。
+
+---
+
+### 完整配置项
 
 ```yaml
 - id: search-tier
   name: dsh-fk-search-tier
   config:
-    order: [tavily, deepseek]
+    # ── 层级顺序 ──
+    order: [tavily, deepseek]              # 搜索：先 Tavily，再 DeepSeek
+    fetchOrder: [deepseek-fetch, direct]   # 抓取：先 DeepSeek Fetch，再直连
 
+    # ── 第 1 层：Tavily ──
     tavily:
-      apiKey: 'tvly-xxxxx'   # app.tavily.com 免费注册，1000 credits/月
-      depth: basic           # basic=1 credit, advanced=2 credits
+      # apiKey 留空 → keyless 匿名档；有 key 走账户额度（1000 credits/月）
+      depth: basic          # basic=1 credit | advanced=2 credits
       maxResults: 8
 
+    # ── DeepSeek 官方 API（Search + Fetch）──
     deepseek:
-      apiKey: 'sk-xxxxx'     # 与主模型同一个 DeepSeek key
+      # apiKey 留空 → 自动读环境变量 DEEPSEEK_API_KEY；仍然没有 → 该层跳过
       baseURL: https://api.deepseek.com
       maxResults: 8
-      needContent: false     # true 会额外抓网页正文（更慢更长）
+      needContent: false     # true 会额外返回网页正文（更慢、更长）
+      fetchMaxBytes: 200000  # Fetch 单页最大字节
 
-    timeoutMs: 20000
-    failOnEmpty: true
+    # ── 直连抓取（零成本兜底）──
+    direct:
+      # userAgent: ''        # 可覆盖默认 UA
+      {}
 
+    # ── 超时 ──
+    timeoutMs: 20000         # 搜索单层超时
+    fetchTimeoutMs: 30000    # 抓取单层超时（页面通常更大）
+    failOnEmpty: true        # 上一层返回 0 条也切下一层
+
+    # ── 熔断 ──
     breaker:
-      threshold: 3
-      burstWindowMs: 300000
-      cooldownMs: 60000
-      quotaCooldownMs: 3600000
+      threshold: 3           # 瞬时故障累计几次才开断
+      burstWindowMs: 300000  # 5 分钟窗口
+      cooldownMs: 60000      # 瞬时故障冷却 60 秒
+      quotaCooldownMs: 3600000  # 额度耗尽冷却 1 小时
 ```
+
+---
+
+### 怎么确认密钥读到了
+
+配好并重启 DSH 后，让 AI 调一次诊断工具：
+
+```
+search_tier_status
+```
+
+返回的 `layers` 里看 `hasKey` 字段：
+
+```json
+{
+  "id": "deepseek",
+  "hasKey": true,        ← true 表示密钥读到了
+  "needsKey": true,
+  "open": false
+}
+```
+
+**`hasKey: false` 说明密钥没读到**，按上面 A / B 检查，并确认已重启 DSH。
+
+---
+
+### 排查清单
+
+| 现象 | 原因 | 解决 |
+|---|---|---|
+| `hasKey: false` | 环境变量没设，或设了没重启 DSH | 重设 + 重启 |
+| `hasKey: true` 但报 401 | key 无效或已过期 | 去平台确认 |
+| 一直用 Tavily，从不切 DeepSeek | Tavily 正常时不会切（这是设计） | 正常现象 |
+| 两层都失败 | 网络问题 / 两边都额度耗尽 | 看错误信息里的 `skipped-open` |
 
 ---
 
