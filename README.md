@@ -367,6 +367,48 @@ DSH 0.2.1-rc.2 起官方内置了 DeepSeek Search / Fetch provider。两者不�
 
 ---
 
+
+## 更新记录
+
+### v0.2.0（2026-10-20）
+
+**密钥不再随插件发布 —— 修掉一个会泄露 API Key 的安全问题**
+
+插件目录里的 `cordis.patch.yml` 是随插件分发的文件。之前把 `apiKey` 写在那里，
+等于把密钥公开（推 GitHub、发给别人、打包分发都会带上）。
+
+- `cordis.patch.yml` 里的 `apiKey` 一律留空
+- 插件新增环境变量支持：`DEEPSEEK_API_KEY` / `TAVILY_API_KEY`
+- 读取顺序：patch 配置 → 环境变量 → 该层跳过
+- README 新增完整的「配置」章节（含 Windows 设置步骤、profile 覆盖法、排查清单）
+
+**抓取层新增两级 failover**
+
+原来只有搜索有 failover，抓取是单层。现在抓取也两级：
+
+- 第 1 层：DeepSeek Fetch API（返回干净 Markdown）
+- 第 2 层：直连抓取（`fetch` + HTML 转文本，零成本兜底）
+
+**额度感知熔断**
+
+- 瞬时故障：5 分钟内累计 3 次开断，冷却 60 秒
+- **额度耗尽单独识别**：冷却 1 小时（避免反复撞额度墙）
+- 两层都失败时抛明确错误，不静默返回空
+
+**诊断工具**
+
+新增 `search_tier_status` 工具，返回各层状态：是否被熔断、剩余冷却时间、
+最近错误、上次成功用的是哪层、`hasKey` 是否读到密钥。
+
+**自测**
+
+`test/selftest.mjs` 覆盖切换规则、熔断、错误分类；`test/e2e.mjs` 走真实调用。
+测试里的密钥来源改为「环境变量优先，其次从 DSH 凭据文件动态读取」，
+不再硬编码本机路径。
+
+---
+
+
 ## License
 
 MIT
